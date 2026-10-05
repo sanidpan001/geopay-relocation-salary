@@ -1,0 +1,984 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GeoPay — Relocation Salary Equalizer | Cost of Living Salary Comparison</title>
+<meta name="description" content="GeoPay is a free relocation salary calculator: compare cost of living across 190+ cities, find your equivalent salary when moving cities, and see your real raise or pay cut after expenses. All figures are estimates.">
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+tailwind.config = {
+  theme: {
+    extend: {
+      colors: {
+        ink: '#0C1222',
+        ink2: '#111A30',
+        ink3: '#16213C',
+        mint: '#34D399',
+        gold: '#FBBF24',
+      },
+      fontFamily: {
+        display: ['"Segoe UI"', 'system-ui', 'sans-serif'],
+      }
+    }
+  }
+}
+</script>
+<style>
+  body { background-color: #0C1222; }
+  .bg-grid {
+    background-image:
+      linear-gradient(rgba(52,211,153,0.05) 1px, transparent 1px),
+      linear-gradient(rgba(52,211,153,0.05) 1px, transparent 1px);
+    background-size: 44px 44px;
+  }
+  .glass { background: rgba(22,33,60,0.72); backdrop-filter: blur(10px); }
+  .glow-mint { box-shadow: 0 0 32px rgba(52,211,153,0.18); }
+  .bar-track { background: rgba(148,163,184,0.16); }
+  details.faq summary { cursor: pointer; list-style: none; }
+  details.faq summary::-webkit-details-marker { display: none; }
+  details.faq summary::after { content: '+'; float: right; color: #FBBF24; font-weight: 700; font-size: 1.25rem; }
+  details.faq[open] summary::after { content: '–'; }
+  details.faq[open] { border-color: rgba(52,211,153,0.5); }
+  input, select { color-scheme: dark; }
+  input:focus, select:focus { outline: 2px solid #34D399; outline-offset: 1px; }
+  @media print { .no-print { display: none !important; } }
+  .dial-arc { transition: stroke-dashoffset 0.9s ease; }
+</style>
+<script id="v3-geopay-relocation-salary-lib">
+/* GeoPay v3 — relocation salary equalizer: pure logic, no DOM access.
+   ---------------------------------------------------------------------------
+   All cost-of-living indices are ESTIMATES compiled from public knowledge
+   (Numbeo-style consumer baskets, rounded, no rent/housing index split).
+   Currency rates are rough estimates. Every figure this tool produces is an
+   approximation for planning, NOT financial advice. */
+
+var GEOPAY_VERSION = '3.0.0';
+
+/* Baseline monthly spend for a single professional in New York City (USD),
+   covering housing + food + transport + everything else, modest lifestyle. */
+var GEOPAY_NYC_BASELINE = 4300;
+
+/* Expense split of the baseline basket (estimates). */
+var GEOPAY_EXPENSE_SHARES = { housing: 0.40, food: 0.22, transport: 0.08, other: 0.30 };
+
+var GEOPAY_COUNTRY_CURRENCY = {
+  'United States': 'USD', 'Canada': 'CAD', 'Mexico': 'MXN', 'Brazil': 'BRL',
+  'Argentina': 'ARS', 'Chile': 'CLP', 'Colombia': 'COP', 'Peru': 'PEN',
+  'Panama': 'USD', 'Costa Rica': 'CRC', 'Uruguay': 'UYU', 'Switzerland': 'CHF',
+  'Norway': 'NOK', 'Denmark': 'DKK', 'Iceland': 'ISK', 'United Kingdom': 'GBP',
+  'Ireland': 'EUR', 'France': 'EUR', 'Luxembourg': 'EUR', 'Netherlands': 'EUR',
+  'Sweden': 'SEK', 'Germany': 'EUR', 'Finland': 'EUR', 'Belgium': 'EUR',
+  'Austria': 'EUR', 'Italy': 'EUR', 'Spain': 'EUR', 'Portugal': 'EUR',
+  'Czechia': 'CZK', 'Greece': 'EUR', 'Slovenia': 'EUR', 'Poland': 'PLN',
+  'Estonia': 'EUR', 'Hungary': 'HUF', 'Slovakia': 'EUR', 'Latvia': 'EUR',
+  'Lithuania': 'EUR', 'Croatia': 'EUR', 'Romania': 'RON', 'Turkey': 'TRY',
+  'Bulgaria': 'BGN', 'Israel': 'ILS', 'UAE': 'AED', 'Qatar': 'QAR',
+  'Kuwait': 'KWD', 'Saudi Arabia': 'SAR', 'Bahrain': 'BHD', 'Oman': 'OMR',
+  'Jordan': 'JOD', 'South Africa': 'ZAR', 'Kenya': 'KES', 'Morocco': 'MAD',
+  'Ghana': 'GHS', 'Nigeria': 'NGN', 'Tunisia': 'TND', 'Egypt': 'EGP',
+  'Hong Kong': 'HKD', 'Singapore': 'SGD', 'Japan': 'JPY', 'Australia': 'AUD',
+  'South Korea': 'KRW', 'New Zealand': 'NZD', 'Taiwan': 'TWD', 'China': 'CNY',
+  'Thailand': 'THB', 'Malaysia': 'MYR', 'Indonesia': 'IDR', 'Philippines': 'PHP',
+  'Vietnam': 'VND', 'India': 'INR', 'Pakistan': 'PKR', 'Bangladesh': 'BDT',
+  'Sri Lanka': 'LKR', 'Nepal': 'NPR', 'Cambodia': 'KHR', 'Myanmar': 'MMK',
+  'Kazakhstan': 'KZT', 'Uzbekistan': 'UZS', 'Mongolia': 'MNT', 'Georgia': 'GEL',
+  'Armenia': 'AMD', 'Azerbaijan': 'AZN'
+};
+
+/* Units of local currency per 1 USD — rough estimates, not live rates. */
+var GEOPAY_FX_PER_USD = {
+  USD: 1, CAD: 1.37, MXN: 18.5, BRL: 5.4, ARS: 950, CLP: 940, COP: 4100,
+  PEN: 3.75, CRC: 520, UYU: 40, CHF: 0.88, NOK: 10.7, DKK: 6.86, ISK: 138,
+  GBP: 0.79, EUR: 0.92, SEK: 10.5, CZK: 23.2, PLN: 4.0, HUF: 365, RON: 4.6,
+  TRY: 34, BGN: 1.8, ILS: 3.7, AED: 3.67, QAR: 3.64, KWD: 0.31, SAR: 3.75,
+  BHD: 0.38, OMR: 0.38, JOD: 0.71, ZAR: 18.2, KES: 129, MAD: 10.1, GHS: 15.5,
+  NGN: 1550, TND: 3.15, EGP: 48.5, HKD: 7.8, SGD: 1.34, JPY: 149, AUD: 1.52,
+  KRW: 1380, NZD: 1.64, TWD: 32.5, CNY: 7.24, THB: 36.5, MYR: 4.7, IDR: 15800,
+  PHP: 58.5, VND: 25400, INR: 83.3, PKR: 278, BDT: 117, LKR: 300, NPR: 133,
+  KHR: 4100, MMK: 2100, KZT: 480, UZS: 12800, MNT: 3400, GEL: 2.7, AMD: 390,
+  AZN: 1.7
+};
+
+var GEOPAY_CURRENCY_SYMBOLS = {
+  USD: '$', CAD: 'C$', MXN: 'MX$', BRL: 'R$', ARS: 'AR$', CLP: 'CL$',
+  COP: 'CO$', PEN: 'S/', CRC: '₡', UYU: '$U', CHF: 'CHF ', NOK: 'kr ',
+  DKK: 'kr ', ISK: 'kr ', GBP: '£', EUR: '€', SEK: 'kr ', CZK: 'Kč ',
+  PLN: 'zł ', HUF: 'Ft ', RON: 'lei ', TRY: '₺', BGN: 'лв ', ILS: '₪',
+  AED: 'AED ', QAR: 'QAR ', KWD: 'KWD ', SAR: 'SAR ', BHD: 'BHD ',
+  OMR: 'OMR ', JOD: 'JOD ', ZAR: 'R ', KES: 'KSh ', MAD: 'MAD ', GHS: 'GH₵ ',
+  NGN: '₦', TND: 'TND ', EGP: 'E£ ', HKD: 'HK$', SGD: 'S$', JPY: '¥',
+  AUD: 'A$', KRW: '₩', NZD: 'NZ$', TWD: 'NT$', CNY: '¥', THB: '฿',
+  MYR: 'RM ', IDR: 'Rp ', PHP: '₱', VND: '₫', INR: '₹', PKR: 'Rs ',
+  BDT: '৳ ', LKR: 'Rs ', NPR: 'Rs ', KHR: 'KHR ', MMK: 'K ', KZT: '₸ ',
+  UZS: 'UZS ', MNT: '₮ ', GEL: '₾ ', AMD: '֏ ', AZN: '₼ '
+};
+
+/* [city, country, cost-of-living index (NYC = 100, ESTIMATES)] */
+var GEOPAY_CITY_ROWS = [
+  ['New York', 'United States', 100],
+  ['San Francisco', 'United States', 94],
+  ['San Jose', 'United States', 92],
+  ['Honolulu', 'United States', 88],
+  ['Oakland', 'United States', 88],
+  ['Boston', 'United States', 88],
+  ['Washington DC', 'United States', 86],
+  ['Seattle', 'United States', 85],
+  ['Los Angeles', 'United States', 84],
+  ['San Diego', 'United States', 82],
+  ['Miami', 'United States', 80],
+  ['Anchorage', 'United States', 80],
+  ['Chicago', 'United States', 78],
+  ['Sacramento', 'United States', 78],
+  ['Portland', 'United States', 76],
+  ['Philadelphia', 'United States', 76],
+  ['Denver', 'United States', 76],
+  ['Austin', 'United States', 74],
+  ['Providence', 'United States', 74],
+  ['Minneapolis', 'United States', 72],
+  ['Dallas', 'United States', 72],
+  ['Baltimore', 'United States', 72],
+  ['Nashville', 'United States', 72],
+  ['Las Vegas', 'United States', 72],
+  ['Atlanta', 'United States', 70],
+  ['Phoenix', 'United States', 70],
+  ['Charlotte', 'United States', 70],
+  ['Salt Lake City', 'United States', 70],
+  ['Fresno', 'United States', 70],
+  ['Spokane', 'United States', 70],
+  ['Houston', 'United States', 68],
+  ['Raleigh', 'United States', 68],
+  ['New Orleans', 'United States', 68],
+  ['Boise', 'United States', 68],
+  ['Tucson', 'United States', 68],
+  ['Albuquerque', 'United States', 68],
+  ['Bakersfield', 'United States', 68],
+  ['Cleveland', 'United States', 66],
+  ['Pittsburgh', 'United States', 66],
+  ['St. Louis', 'United States', 66],
+  ['Columbus', 'United States', 66],
+  ['Milwaukee', 'United States', 66],
+  ['Kansas City', 'United States', 66],
+  ['Detroit', 'United States', 64],
+  ['Indianapolis', 'United States', 64],
+  ['Oklahoma City', 'United States', 64],
+  ['El Paso', 'United States', 64],
+  ['Des Moines', 'United States', 64],
+  ['Omaha', 'United States', 64],
+  ['Buffalo', 'United States', 64],
+  ['Memphis', 'United States', 62],
+  ['Toronto', 'Canada', 74],
+  ['Vancouver', 'Canada', 76],
+  ['Calgary', 'Canada', 70],
+  ['Ottawa', 'Canada', 68],
+  ['Edmonton', 'Canada', 68],
+  ['Montreal', 'Canada', 66],
+  ['Winnipeg', 'Canada', 62],
+  ['Quebec City', 'Canada', 62],
+  ['Mexico City', 'Mexico', 48],
+  ['Sao Paulo', 'Brazil', 44],
+  ['Rio de Janeiro', 'Brazil', 42],
+  ['Buenos Aires', 'Argentina', 40],
+  ['Santiago', 'Chile', 52],
+  ['Bogota', 'Colombia', 38],
+  ['Lima', 'Peru', 40],
+  ['Panama City', 'Panama', 50],
+  ['San José', 'Costa Rica', 52],
+  ['Montevideo', 'Uruguay', 50],
+  ['Zurich', 'Switzerland', 118],
+  ['Geneva', 'Switzerland', 114],
+  ['Bern', 'Switzerland', 112],
+  ['Basel', 'Switzerland', 110],
+  ['Oslo', 'Norway', 104],
+  ['Copenhagen', 'Denmark', 102],
+  ['Reykjavik', 'Iceland', 96],
+  ['London', 'United Kingdom', 88],
+  ['Dublin', 'Ireland', 86],
+  ['Paris', 'France', 84],
+  ['Luxembourg', 'Luxembourg', 84],
+  ['Amsterdam', 'Netherlands', 80],
+  ['Stockholm', 'Sweden', 78],
+  ['Munich', 'Germany', 78],
+  ['Helsinki', 'Finland', 78],
+  ['Frankfurt', 'Germany', 76],
+  ['Milan', 'Italy', 74],
+  ['Hamburg', 'Germany', 74],
+  ['Brussels', 'Belgium', 74],
+  ['Edinburgh', 'United Kingdom', 72],
+  ['Berlin', 'Germany', 72],
+  ['Vienna', 'Austria', 72],
+  ['Rome', 'Italy', 70],
+  ['Manchester', 'United Kingdom', 70],
+  ['Lyon', 'France', 70],
+  ['Birmingham', 'United Kingdom', 68],
+  ['Madrid', 'Spain', 66],
+  ['Barcelona', 'Spain', 64],
+  ['Valencia', 'Spain', 60],
+  ['Lisbon', 'Portugal', 58],
+  ['Prague', 'Czechia', 58],
+  ['Athens', 'Greece', 56],
+  ['Ljubljana', 'Slovenia', 56],
+  ['Porto', 'Portugal', 54],
+  ['Warsaw', 'Poland', 54],
+  ['Tallinn', 'Estonia', 54],
+  ['Budapest', 'Hungary', 52],
+  ['Bratislava', 'Slovakia', 52],
+  ['Riga', 'Latvia', 52],
+  ['Vilnius', 'Lithuania', 52],
+  ['Krakow', 'Poland', 52],
+  ['Zagreb', 'Croatia', 50],
+  ['Bucharest', 'Romania', 50],
+  ['Istanbul', 'Turkey', 48],
+  ['Sofia', 'Bulgaria', 46],
+  ['Tel Aviv', 'Israel', 88],
+  ['Dubai', 'UAE', 76],
+  ['Abu Dhabi', 'UAE', 72],
+  ['Doha', 'Qatar', 70],
+  ['Kuwait City', 'Kuwait', 64],
+  ['Riyadh', 'Saudi Arabia', 62],
+  ['Manama', 'Bahrain', 60],
+  ['Jeddah', 'Saudi Arabia', 58],
+  ['Muscat', 'Oman', 58],
+  ['Amman', 'Jordan', 54],
+  ['Cape Town', 'South Africa', 46],
+  ['Nairobi', 'Kenya', 46],
+  ['Johannesburg', 'South Africa', 44],
+  ['Casablanca', 'Morocco', 44],
+  ['Accra', 'Ghana', 44],
+  ['Lagos', 'Nigeria', 42],
+  ['Tunis', 'Tunisia', 40],
+  ['Cairo', 'Egypt', 38],
+  ['Hong Kong', 'Hong Kong', 96],
+  ['Singapore', 'Singapore', 90],
+  ['Tokyo', 'Japan', 84],
+  ['Sydney', 'Australia', 84],
+  ['Melbourne', 'Australia', 82],
+  ['Seoul', 'South Korea', 78],
+  ['Brisbane', 'Australia', 78],
+  ['Perth', 'Australia', 78],
+  ['Adelaide', 'Australia', 76],
+  ['Auckland', 'New Zealand', 76],
+  ['Osaka', 'Japan', 76],
+  ['Nagoya', 'Japan', 74],
+  ['Kyoto', 'Japan', 74],
+  ['Wellington', 'New Zealand', 72],
+  ['Fukuoka', 'Japan', 72],
+  ['Christchurch', 'New Zealand', 70],
+  ['Sapporo', 'Japan', 70],
+  ['Busan', 'South Korea', 70],
+  ['Taipei', 'Taiwan', 68],
+  ['Daegu', 'South Korea', 66],
+  ['Shanghai', 'China', 60],
+  ['Beijing', 'China', 58],
+  ['Shenzhen', 'China', 58],
+  ['Guangzhou', 'China', 56],
+  ['Bangkok', 'Thailand', 50],
+  ['Kuala Lumpur', 'Malaysia', 48],
+  ['Penang', 'Malaysia', 46],
+  ['Ulaanbaatar', 'Mongolia', 46],
+  ['Jakarta', 'Indonesia', 44],
+  ['Bandung', 'Indonesia', 44],
+  ['Chiang Mai', 'Thailand', 44],
+  ['Almaty', 'Kazakhstan', 44],
+  ['Tbilisi', 'Georgia', 44],
+  ['Yerevan', 'Armenia', 44],
+  ['Baku', 'Azerbaijan', 44],
+  ['Manila', 'Philippines', 42],
+  ['Surabaya', 'Indonesia', 42],
+  ['Denpasar', 'Indonesia', 42],
+  ['Bangalore', 'India', 42],
+  ['Mumbai', 'India', 40],
+  ['Pune', 'India', 40],
+  ['Hyderabad', 'India', 40],
+  ['Colombo', 'Sri Lanka', 40],
+  ['Phnom Penh', 'Cambodia', 40],
+  ['Tashkent', 'Uzbekistan', 40],
+  ['Cebu', 'Philippines', 40],
+  ['Ho Chi Minh City', 'Vietnam', 40],
+  ['Delhi', 'India', 38],
+  ['Chennai', 'India', 38],
+  ['Dhaka', 'Bangladesh', 38],
+  ['Kathmandu', 'Nepal', 38],
+  ['Da Nang', 'Vietnam', 38],
+  ['Hanoi', 'Vietnam', 38],
+  ['Kolkata', 'India', 36],
+  ['Ahmedabad', 'India', 36],
+  ['Karachi', 'Pakistan', 36],
+  ['Islamabad', 'Pakistan', 36],
+  ['Yangon', 'Myanmar', 36],
+  ['Lahore', 'Pakistan', 34]
+];
+
+var GEOPAY_CITIES = GEOPAY_CITY_ROWS.map(function (r) {
+  var cur = GEOPAY_COUNTRY_CURRENCY[r[1]] || 'USD';
+  return { name: r[0], country: r[1], col: r[2], currency: cur };
+});
+
+/* ---------------- lookup helpers ---------------- */
+
+function geopayNorm(s) {
+  return String(s == null ? '' : s).trim().toLowerCase();
+}
+
+function geopayFindCity(name) {
+  var n = geopayNorm(name);
+  if (!n) return null;
+  for (var i = 0; i < GEOPAY_CITIES.length; i++) {
+    if (geopayNorm(GEOPAY_CITIES[i].name) === n) return GEOPAY_CITIES[i];
+  }
+  return null;
+}
+
+function geopaySearchCities(query, limit) {
+  var q = geopayNorm(query);
+  var out = [];
+  if (!q) return out;
+  for (var i = 0; i < GEOPAY_CITIES.length; i++) {
+    var c = GEOPAY_CITIES[i];
+    if (geopayNorm(c.name).indexOf(q) !== -1 || geopayNorm(c.country).indexOf(q) !== -1) {
+      out.push(c);
+      if (limit && out.length >= limit) break;
+    }
+  }
+  return out;
+}
+
+function geopayAllCities() {
+  return GEOPAY_CITIES.slice().sort(function (a, b) {
+    return a.name < b.name ? -1 : (a.name > b.name ? 1 : 0);
+  });
+}
+
+/* ---------------- currency helpers ---------------- */
+
+function geopayFxPerUSD(currency) {
+  var r = GEOPAY_FX_PER_USD[currency];
+  return (typeof r === 'number' && r > 0) ? r : null;
+}
+
+function geopayToUSD(amount, currency) {
+  var r = geopayFxPerUSD(currency);
+  if (r === null || !(amount >= 0)) return null;
+  return amount / r;
+}
+
+function geopayFromUSD(amountUSD, currency) {
+  var r = geopayFxPerUSD(currency);
+  if (r === null || !(amountUSD >= 0)) return null;
+  return amountUSD * r;
+}
+
+function geopayFormatMoney(amount, currency) {
+  if (typeof amount !== 'number' || !isFinite(amount)) return '—';
+  var sym = GEOPAY_CURRENCY_SYMBOLS[currency];
+  var prefix = (sym === undefined) ? (currency + ' ') : sym;
+  var abs = Math.abs(amount);
+  var num = abs >= 1000 ? Math.round(abs) : Math.round(abs * 100) / 100;
+  var str = num.toLocaleString('en-US');
+  return (amount < 0 ? '-' : '') + prefix + str;
+}
+
+/* ---------------- cost model (all ESTIMATES) ---------------- */
+
+function geopayMonthlyExpenseUSD(city) {
+  if (!city || !(city.col > 0)) return null;
+  return GEOPAY_NYC_BASELINE * (city.col / 100);
+}
+
+function geopayExpenseBreakdown(city) {
+  var m = geopayMonthlyExpenseUSD(city);
+  if (m === null) return null;
+  var s = GEOPAY_EXPENSE_SHARES;
+  return { housing: m * s.housing, food: m * s.food, transport: m * s.transport, other: m * s.other, total: m };
+}
+
+/* Annual money left after estimated living expenses. */
+function geopayDisposableAnnual(salaryUSD, city) {
+  var m = geopayMonthlyExpenseUSD(city);
+  if (m === null || !(salaryUSD >= 0)) return null;
+  return salaryUSD - m * 12;
+}
+
+/* Share of monthly gross income spent on housing (estimate). */
+function geopayRentBurden(salaryUSD, city) {
+  var b = geopayExpenseBreakdown(city);
+  if (b === null || !(salaryUSD > 0)) return null;
+  return b.housing / (salaryUSD / 12);
+}
+
+/* Share of gross salary left after expenses (estimate). */
+function geopaySavingsRate(salaryUSD, city) {
+  if (!(salaryUSD > 0)) return null;
+  var d = geopayDisposableAnnual(salaryUSD, city);
+  if (d === null) return null;
+  return d / salaryUSD;
+}
+
+function geopayBurdenStatus(burden) {
+  if (burden === null || !isFinite(burden)) return { label: 'Unknown', tone: 'gray' };
+  if (burden < 0.30) return { label: 'Comfortable', tone: 'good' };
+  if (burden < 0.40) return { label: 'Stretched', tone: 'warn' };
+  return { label: 'Overburdened', tone: 'bad' };
+}
+
+function geopaySavingsStatus(rate) {
+  if (rate === null || !isFinite(rate)) return { label: 'Unknown', tone: 'gray' };
+  if (rate >= 0.30) return { label: 'Excellent', tone: 'good' };
+  if (rate >= 0.15) return { label: 'Healthy', tone: 'good' };
+  if (rate >= 0) return { label: 'Tight', tone: 'warn' };
+  return { label: 'Shortfall', tone: 'bad' };
+}
+
+/* Salary needed in the target city for the SAME disposable income. */
+function geopayEquivalentSalary(salaryUSD, fromCity, toCity) {
+  if (!fromCity || !toCity || !(salaryUSD > 0)) return null;
+  var fromExp = geopayMonthlyExpenseUSD(fromCity);
+  var toExp = geopayMonthlyExpenseUSD(toCity);
+  if (fromExp === null || toExp === null) return null;
+  return salaryUSD + (toExp - fromExp) * 12;
+}
+
+/* ---------------- full comparison ---------------- */
+
+function geopayValidate(fromName, toName, salaryUSD) {
+  var errors = [];
+  if (!geopayFindCity(fromName)) errors.push('unknown_from_city');
+  if (!geopayFindCity(toName)) errors.push('unknown_to_city');
+  if (!(salaryUSD > 0) || !isFinite(salaryUSD)) errors.push('invalid_salary');
+  return errors;
+}
+
+function geopayCompare(fromName, toName, salaryUSD, offerUSD) {
+  var from = geopayFindCity(fromName);
+  var to = geopayFindCity(toName);
+  if (!from || !to) return { error: 'unknown_city' };
+  if (!(salaryUSD > 0) || !isFinite(salaryUSD)) return { error: 'invalid_salary' };
+
+  var equivalent = geopayEquivalentSalary(salaryUSD, from, to);
+  var offer = (offerUSD > 0 && isFinite(offerUSD)) ? offerUSD : equivalent;
+  var sameCity = geopayNorm(from.name) === geopayNorm(to.name);
+
+  var curDisp = geopayDisposableAnnual(salaryUSD, from);
+  var tgtDisp = geopayDisposableAnnual(offer, to);
+  var delta = tgtDisp - curDisp;
+  var tolerance = Math.max(0.01 * Math.abs(salaryUSD), 500);
+  var verdict = delta > tolerance ? 'raise' : (delta < -tolerance ? 'cut' : 'equal');
+
+  return {
+    error: null,
+    from: from,
+    to: to,
+    sameCity: sameCity,
+    currentUSD: salaryUSD,
+    equivalentUSD: equivalent,
+    offerUSD: offer,
+    curDisp: curDisp,
+    tgtDisp: tgtDisp,
+    delta: delta,
+    deltaPct: salaryUSD > 0 ? delta / salaryUSD : null,
+    verdict: verdict,
+    curBurden: geopayRentBurden(salaryUSD, from),
+    tgtBurden: geopayRentBurden(offer, to),
+    curSavings: geopaySavingsRate(salaryUSD, from),
+    tgtSavings: geopaySavingsRate(offer, to),
+    curBreakdown: geopayExpenseBreakdown(from),
+    tgtBreakdown: geopayExpenseBreakdown(to),
+    estimates: true
+  };
+}
+
+</script>
+</head>
+<body id="top" class="bg-ink text-slate-200 font-display min-h-screen">
+
+<!-- ============ STICKY HEADER ============ -->
+<header class="no-print sticky top-0 z-50 bg-ink/90 backdrop-blur border-b border-mint/20">
+  <div class="mx-auto max-w-6xl px-4 sm:px-6 h-16 flex items-center justify-between">
+    <a href="#top" class="flex items-center gap-2.5">
+      <span class="inline-flex items-center justify-center w-9 h-9 rounded-xl bg-mint/15 border border-mint/40">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#34D399" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 8h1a4 4 0 1 1 0 8h-1"/><path d="M3 8h14v9a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4Z"/><line x1="6" y1="2" x2="6" y2="4"/><line x1="10" y1="2" x2="10" y2="4"/><line x1="14" y1="2" x2="14" y2="4"/></svg>
+      </span>
+      <span class="text-xl font-extrabold tracking-tight text-white">Geo<span class="text-mint">Pay</span></span>
+    </a>
+    <nav class="flex items-center gap-5 text-sm font-medium">
+      <a href="#top" class="text-slate-300 hover:text-mint transition">Home</a>
+      <span class="text-slate-600">|</span>
+      <a href="https://fixoraa.tech" class="text-slate-300 hover:text-mint transition">More Tools</a>
+    </nav>
+  </div>
+</header>
+
+<!-- ============ TOP AD (verbatim) ============ -->
+<div class="no-print mx-auto max-w-6xl px-4 sm:px-6 pt-4" role="complementary" aria-label="Advertisement">
+  <div class="mx-auto text-center" style="max-width:728px">
+    <span class="block text-[10px] tracking-[0.18em] uppercase text-slate-400 mb-1.5">Advertisement</span>
+    <div class="flex justify-center overflow-hidden">
+      <div class="origin-top scale-[0.44] sm:scale-100 shrink-0">
+        <script>
+          atOptions = { 'key' : '4e68ac77881c17fe128a46565d9a4e8c', 'format' : 'iframe', 'height' : 90, 'width' : 728, 'params' : {} };
+        </script>
+        <script src="https://www.highrevenueformat.com/4e68ac77881c17fe128a46565d9a4e8c/invoke.js"></script>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ TOOL ============ -->
+<main class="bg-grid">
+  <div class="mx-auto max-w-6xl px-4 sm:px-6 py-8 sm:py-12">
+
+    <div class="text-center max-w-3xl mx-auto">
+      <span class="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full text-xs font-bold tracking-wide bg-mint/10 border border-mint/40 text-mint uppercase">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M13 2 3 14h7l-1 8 10-12h-7l1-8z"/></svg>
+        Unlimited Free Usage
+      </span>
+      <h1 class="mt-4 text-3xl sm:text-5xl font-extrabold text-white tracking-tight leading-tight">
+        Relocation Salary <span class="text-mint">Equalizer</span>
+      </h1>
+      <p class="mt-3 text-slate-400 text-sm sm:text-base">
+        Moving cities? Compare your salary's real power across <span class="text-gold font-semibold">190+ cities</span> —
+        100% offline, no sign-up. Find the equivalent salary, your disposable income after expenses,
+        and whether that offer is a <span class="text-white font-semibold">real raise or a pay cut</span>.
+      </p>
+      <p class="mt-2 text-[11px] text-slate-500">All figures are estimates from a baked-in cost-of-living dataset — see methodology below.</p>
+    </div>
+
+    <!-- ======= CONTROL DECK ======= -->
+    <section class="mt-8 glass border border-mint/25 rounded-2xl p-5 sm:p-8 glow-mint" aria-label="Relocation salary calculator">
+      <datalist id="city-list"></datalist>
+      <div class="grid md:grid-cols-2 gap-6">
+        <!-- FROM -->
+        <div class="rounded-xl bg-ink2/80 border border-slate-700/60 p-5">
+          <div class="flex items-center gap-2 mb-4">
+            <span class="w-7 h-7 rounded-lg bg-mint/15 border border-mint/40 text-mint text-sm font-bold flex items-center justify-center">A</span>
+            <h2 class="text-white font-bold">Where you are now</h2>
+          </div>
+          <label for="city-from" class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1.5">Current city</label>
+          <input id="city-from" list="city-list" placeholder="e.g. Bangalore" autocomplete="off"
+            class="w-full rounded-lg bg-ink border border-slate-600 px-3.5 py-2.5 text-white placeholder-slate-500 text-sm">
+          <div class="grid grid-cols-2 gap-3 mt-4">
+            <div>
+              <label for="salary-from" class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1.5">Annual salary</label>
+              <input id="salary-from" type="number" min="0" step="any" placeholder="e.g. 1200000"
+                class="w-full rounded-lg bg-ink border border-slate-600 px-3.5 py-2.5 text-white placeholder-slate-500 text-sm">
+            </div>
+            <div>
+              <label for="currency-from" class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1.5">Currency</label>
+              <select id="currency-from" class="w-full rounded-lg bg-ink border border-slate-600 px-3 py-2.5 text-white text-sm"></select>
+            </div>
+          </div>
+        </div>
+        <!-- TO -->
+        <div class="rounded-xl bg-ink2/80 border border-gold/40 p-5">
+          <div class="flex items-center gap-2 mb-4">
+            <span class="w-7 h-7 rounded-lg bg-gold/15 border border-gold/50 text-gold text-sm font-bold flex items-center justify-center">B</span>
+            <h2 class="text-white font-bold">Where you're headed</h2>
+          </div>
+          <label for="city-to" class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1.5">Target city</label>
+          <input id="city-to" list="city-list" placeholder="e.g. Berlin" autocomplete="off"
+            class="w-full rounded-lg bg-ink border border-slate-600 px-3.5 py-2.5 text-white placeholder-slate-500 text-sm">
+          <div class="grid grid-cols-2 gap-3 mt-4">
+            <div>
+              <label for="salary-to" class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1.5">Offer there <span class="normal-case font-normal text-slate-500">(optional)</span></label>
+              <input id="salary-to" type="number" min="0" step="any" placeholder="blank = equivalent"
+                class="w-full rounded-lg bg-ink border border-slate-600 px-3.5 py-2.5 text-white placeholder-slate-500 text-sm">
+            </div>
+            <div>
+              <label for="currency-to" class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1.5">Currency</label>
+              <select id="currency-to" class="w-full rounded-lg bg-ink border border-slate-600 px-3 py-2.5 text-white text-sm"></select>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="mt-6 flex flex-col sm:flex-row items-center gap-4">
+        <button id="compare-btn"
+          class="w-full sm:w-auto px-10 py-3.5 rounded-xl font-extrabold text-ink bg-mint hover:bg-emerald-300 transition text-base tracking-wide">
+          COMPARE&nbsp;&nbsp;→
+        </button>
+        <p id="error-msg" class="hidden text-sm text-red-400 font-medium" role="alert"></p>
+        <p class="text-[11px] text-slate-500 sm:ml-auto">Leave the offer blank and GeoPay computes the <span class="text-gold">equivalent salary</span> — the pay that keeps your lifestyle identical.</p>
+      </div>
+    </section>
+
+    <!-- ======= RESULTS DASHBOARD ======= -->
+    <section id="results" class="hidden mt-8" aria-live="polite" aria-label="Comparison results">
+      <!-- verdict banner -->
+      <div id="verdict-banner" class="rounded-2xl border p-5 sm:p-6 flex flex-col sm:flex-row sm:items-center gap-4">
+        <div id="verdict-icon" class="shrink-0"></div>
+        <div class="flex-1">
+          <p id="verdict-text" class="text-2xl sm:text-3xl font-extrabold text-white"></p>
+          <p id="verdict-sub" class="mt-1 text-sm text-slate-300"></p>
+        </div>
+        <div class="text-left sm:text-right">
+          <p class="text-[11px] uppercase tracking-widest text-slate-400">Equivalent salary in <span id="equiv-city"></span></p>
+          <p id="equiv-amount" class="text-3xl sm:text-4xl font-extrabold text-gold"></p>
+          <p id="delta-val" class="text-sm font-semibold mt-1"></p>
+        </div>
+      </div>
+
+      <!-- disposable income face-off -->
+      <div class="grid md:grid-cols-2 gap-6 mt-6">
+        <div class="rounded-2xl glass border border-mint/25 p-5 sm:p-6">
+          <p class="text-[11px] uppercase tracking-widest text-mint font-bold">Current · <span id="disp-from-city"></span></p>
+          <p class="mt-2 text-sm text-slate-400">Disposable income / year <span class="text-slate-500">(after estimated expenses)</span></p>
+          <p id="disp-from-val" class="text-3xl font-extrabold text-white mt-1"></p>
+          <div class="mt-4">
+            <div class="flex justify-between text-xs text-slate-400 mb-1"><span>Expenses</span><span id="exp-from-val"></span></div>
+            <div class="h-3 rounded-full bar-track overflow-hidden"><div id="bar-exp-from" class="h-full rounded-full bg-slate-500" style="width:0%"></div></div>
+            <div class="flex justify-between text-xs text-slate-400 mb-1 mt-3"><span>Left over</span><span id="left-from-val"></span></div>
+            <div class="h-3 rounded-full bar-track overflow-hidden"><div id="bar-left-from" class="h-full rounded-full bg-mint" style="width:0%"></div></div>
+          </div>
+          <div id="breakdown-from" class="mt-4 space-y-2"></div>
+        </div>
+        <div class="rounded-2xl glass border border-gold/30 p-5 sm:p-6">
+          <p class="text-[11px] uppercase tracking-widest text-gold font-bold">Target · <span id="disp-to-city"></span></p>
+          <p class="mt-2 text-sm text-slate-400">Disposable income / year <span class="text-slate-500">(after estimated expenses)</span></p>
+          <p id="disp-to-val" class="text-3xl font-extrabold text-white mt-1"></p>
+          <div class="mt-4">
+            <div class="flex justify-between text-xs text-slate-400 mb-1"><span>Expenses</span><span id="exp-to-val"></span></div>
+            <div class="h-3 rounded-full bar-track overflow-hidden"><div id="bar-exp-to" class="h-full rounded-full bg-slate-500" style="width:0%"></div></div>
+            <div class="flex justify-between text-xs text-slate-400 mb-1 mt-3"><span>Left over</span><span id="left-to-val"></span></div>
+            <div class="h-3 rounded-full bar-track overflow-hidden"><div id="bar-left-to" class="h-full rounded-full bg-gold" style="width:0%"></div></div>
+          </div>
+          <div id="breakdown-to" class="mt-4 space-y-2"></div>
+        </div>
+      </div>
+
+      <!-- dials -->
+      <div class="grid sm:grid-cols-2 gap-6 mt-6">
+        <div class="rounded-2xl glass border border-slate-700/60 p-5 sm:p-6 text-center">
+          <h3 class="text-white font-bold">Rent Burden</h3>
+          <p class="text-xs text-slate-500 mt-0.5">share of income spent on housing (estimate)</p>
+          <div class="flex justify-center gap-6 mt-3">
+            <div><div id="dial-rent-from"></div><p class="text-xs text-slate-400 mt-1" id="dial-rent-from-label"></p></div>
+            <div><div id="dial-rent-to"></div><p class="text-xs text-slate-400 mt-1" id="dial-rent-to-label"></p></div>
+          </div>
+        </div>
+        <div class="rounded-2xl glass border border-slate-700/60 p-5 sm:p-6 text-center">
+          <h3 class="text-white font-bold">Savings Rate</h3>
+          <p class="text-xs text-slate-500 mt-0.5">share of salary left after expenses (estimate)</p>
+          <div class="flex justify-center gap-6 mt-3">
+            <div><div id="dial-sav-from"></div><p class="text-xs text-slate-400 mt-1" id="dial-sav-from-label"></p></div>
+            <div><div id="dial-sav-to"></div><p class="text-xs text-slate-400 mt-1" id="dial-sav-to-label"></p></div>
+          </div>
+        </div>
+      </div>
+
+      <p class="mt-6 text-center text-[11px] text-slate-500 max-w-2xl mx-auto">
+        Estimates only: baked-in cost-of-living indices and rough currency rates, no live data, taxes not deducted.
+        Use for planning and negotiation — not as financial advice.
+      </p>
+    </section>
+  </div>
+</main>
+
+<!-- ============ BOTTOM AD (verbatim) ============ -->
+<div class="no-print mx-auto max-w-6xl px-4 sm:px-6 pb-4" role="complementary" aria-label="Advertisement">
+  <div class="mx-auto text-center" style="max-width:728px">
+    <span class="block text-[10px] tracking-[0.18em] uppercase text-slate-400 mb-1.5">Advertisement</span>
+    <div class="flex justify-center overflow-hidden">
+      <script async src="https://js.wpadmngr.com/static/adManager.js" data-admpid="464498"></script>
+    </div>
+  </div>
+</div>
+
+<!-- ============ SEO ARTICLE ============ -->
+<article id="seo-article" class="mx-auto max-w-4xl px-4 sm:px-6 py-10 sm:py-14 text-slate-300">
+  <h2 class="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">Relocation Salary Calculator: What Your Pay Is Really Worth in Another City</h2>
+  <p class="mt-4 leading-7">A job offer of $120,000 in Austin is not the same thing as $120,000 in San Francisco. It sounds obvious, yet most people evaluate relocation offers by comparing the headline numbers — and then get an expensive surprise when rent alone eats the raise. A <strong class="text-white">relocation salary calculator</strong> exists to fix exactly that mistake: it translates a salary from one city into the pay you would need in another city to keep the same standard of living, and tells you whether an offer is a genuine raise or a disguised pay cut.</p>
+  <p class="mt-4 leading-7">GeoPay does this with a fully offline, baked-in dataset of more than 190 cities worldwide. There is no API call, no account, and no waiting — the numbers come from cost-of-living indices compiled from public knowledge, normalized so that New York City equals 100. Everything on this page is an <strong class="text-white">estimate</strong>: good enough for planning, negotiating, and shortlisting cities, but never a substitute for local research or professional financial advice.</p>
+
+  <h3 class="mt-8 text-xl font-bold text-white">How an equivalent salary is calculated</h3>
+  <p class="mt-3 leading-7">The core idea behind any <strong class="text-white">cost of living salary comparison</strong> is simple. Start with your current salary and subtract what life costs in your current city — housing, food, transport, and everything else. What remains is your <strong class="text-white">disposable income</strong>: the money you can actually save, invest, or spend freely. Then ask: what salary in the target city would leave you with exactly the same disposable income?</p>
+  <p class="mt-4 leading-7">GeoPay's formula is: <em>equivalent salary = current salary + 12 × (monthly expenses in target city − monthly expenses in current city)</em>. If the target city is cheaper, the equivalent salary comes out lower than your current pay — meaning you could earn less on paper and still live just as well. If it is more expensive, the equivalent salary rises, and any offer below it is effectively a pay cut no matter how impressive the number looks.</p>
+  <p class="mt-4 leading-7">This disposable-income method is more honest than the common shortcut of multiplying your salary by a cost-of-living ratio. Ratio multiplication assumes every dollar of your income scales with local prices, which is not true: savings, investments, and debt payments do not get cheaper when you move to a cheaper city. By anchoring on disposable income instead of raw ratios, GeoPay is an <strong class="text-white">equivalent salary calculator moving cities</strong> onto one comparable scale: the money you actually keep.</p>
+
+  <h3 class="mt-8 text-xl font-bold text-white">Cost-of-living indices, explained honestly</h3>
+  <p class="mt-3 leading-7">GeoPay assigns every city a cost-of-living index with New York City at 100. A city indexed at 50 is estimated to cost roughly half as much for a comparable basket of goods and services; a city at 118, like Zurich, is estimated to cost about 18 percent more than New York. These indices are compiled from public knowledge of consumer-price baskets — groceries, restaurant meals, rent, utilities, transport, and everyday services — rounded into a single number.</p>
+  <p class="mt-4 leading-7">A single number can never capture everything. Two people can live in the same city with wildly different budgets: a person who cooks at home and cycles to work spends far less than one who eats out daily and drives. GeoPay models a <strong class="text-white">single professional with a modest lifestyle</strong> as its baseline. Families, luxury lifestyles, and ultra-frugal minimalists will all deviate from these estimates — in predictable directions, which is why the tool shows you the expense breakdown (housing, food, transport, other) so you can judge where your own spending differs.</p>
+  <p class="mt-4 leading-7">Indices also move. Rents surge, currencies swing, and a dataset baked into a web page cannot track live markets. Treat the indices as a snapshot for comparison, and before signing anything, check current rents on local listings and current exchange rates from a live source.</p>
+
+  <h3 class="mt-8 text-xl font-bold text-white">Disposable income: the number that actually matters</h3>
+  <p class="mt-3 leading-7">Headline salary is a vanity metric. What determines your quality of life is salary minus unavoidable costs. GeoPay's dashboard puts <strong class="text-white">disposable income after expenses</strong> front and center for both cities, side by side, so the comparison is visual and immediate. The verdict — real raise, pay cut, or roughly equal — is computed from the change in disposable income, not the change in salary.</p>
+  <p class="mt-4 leading-7">Consider a concrete example. You earn the equivalent of $90,000 in Bangalore and receive a $110,000 offer in Seattle. The salary is 22 percent higher — but if Seattle's estimated living costs exceed Bangalore's by $25,000 a year, your disposable income actually falls, and GeoPay will label the move a pay cut. Flip the direction — $110,000 in Seattle to an $85,000 offer in Lisbon — and the lower number can still be a real raise if expenses drop by more than $25,000. This is the entire point of a relocation salary calculator: it stops you from being fooled by nominal figures.</p>
+
+  <h3 class="mt-8 text-xl font-bold text-white">Rent burden: the 30 percent rule</h3>
+  <p class="mt-3 leading-7">Housing is the single biggest lever in any move, which is why GeoPay includes a dedicated <strong class="text-white">rent-burden dial</strong>. Rent burden is the share of your gross income spent on housing. The long-standing personal-finance guideline is to keep it under 30 percent: below that, the dial reads "Comfortable"; between 30 and 40 percent it reads "Stretched"; above 40 percent, "Overburdened".</p>
+  <p class="mt-4 leading-7">Watch how the dial moves between your two cities. A move can raise your disposable income while simultaneously pushing your rent burden into the red — common when relocating from a city where you own a home to one where you will rent at market rates. Conversely, some offers look modest until you see the rent burden drop from 45 percent to 25 percent, which transforms daily life even if the salary barely changed. Landlords in many cities also apply their own version of this rule, often requiring income of three times the rent, so the dial doubles as a rough reality check on the apartments you will actually qualify for.</p>
+
+  <h3 class="mt-8 text-xl font-bold text-white">Savings rate: measuring your real raise</h3>
+  <p class="mt-3 leading-7">The second dial tracks your <strong class="text-white">savings rate</strong> — disposable income as a share of salary. GeoPay rates it Excellent at 30 percent or more, Healthy between 15 and 30 percent, Tight between 0 and 15 percent, and Shortfall when expenses exceed income entirely. If your savings rate rises after a move, the offer is building your wealth faster regardless of what the headline salary says; if it falls, the move is costing you future freedom.</p>
+  <p class="mt-4 leading-7">This framing is especially useful for early-career professionals. A 10 percent nominal raise that drops your savings rate from 25 percent to 10 percent is not a career win — it is lifestyle inflation imposed by geography. Negotiate with the savings-rate number in hand: "to keep my current savings rate, I would need X" is a far stronger argument than "I want more money," because it is anchored in arithmetic rather than appetite.</p>
+
+  <h3 class="mt-8 text-xl font-bold text-white">What this calculator deliberately leaves out</h3>
+  <p class="mt-4 leading-7">No free tool can model everything, and honest tools say so. GeoPay does <strong class="text-white">not</strong> deduct income tax, because tax systems vary enormously — a move from Texas to California, or from Dubai to London, changes the tax picture more than the grocery bill does. It does not model healthcare costs, school fees, visa expenses, or the one-time cost of the move itself. Currency conversions use rough baked-in rates rather than live foreign-exchange data, so cross-currency comparisons carry extra uncertainty. And the expense basket assumes a single professional; add a partner, children, or a car, and your personal numbers will shift.</p>
+  <p class="mt-4 leading-7">Use GeoPay as the first filter, not the final answer. If the tool says an offer is a 20 percent real raise, that is a strong signal worth pursuing with deeper research. If it says the offer is borderline, dig into the two or three expense categories that dominate your personal budget before deciding.</p>
+
+  <h3 class="mt-8 text-xl font-bold text-white">How to use the number in a negotiation</h3>
+  <p class="mt-3 leading-7">Employers relocating talent usually have a cost-of-living adjustment budget — but they rarely volunteer it. Walk in with three numbers from this page: the <strong class="text-white">equivalent salary</strong> (your walk-away line for equal lifestyle), the <strong class="text-white">rent burden</strong> at their offer (your quality-of-life argument), and the <strong class="text-white">savings-rate change</strong> (your wealth argument). Ask for the equivalent salary plus a premium for the disruption of moving: new city, new network, new risks. Many relocation packages also include one-time help — moving costs, temporary housing, a signing bonus — which can bridge a gap that the base salary alone does not close.</p>
+  <p class="mt-4 leading-7">If the employer cannot meet the equivalent salary, negotiate on the expense side instead: remote-work flexibility that lets you live in a cheaper suburb, housing assistance, or a cost-of-living review after twelve months. The dashboard gives you the vocabulary for all of these conversations.</p>
+
+  <h3 class="mt-8 text-xl font-bold text-white">Moving within a country vs. across borders</h3>
+  <p class="mt-3 leading-7">Domestic moves are the calculator's home turf: same currency, same tax system, and the cost-of-living index does most of the work. International moves add layers — exchange-rate risk, different tax regimes, visa constraints, and sometimes dramatically different definitions of a normal lifestyle. GeoPay handles the currency conversion with estimated rates and flags the result accordingly, but for international offers you should additionally research the destination's tax brackets, mandatory social charges, and healthcare system. A salary that looks generous pre-tax can be ordinary post-tax, and no cost-of-living index captures that.</p>
+
+  <h3 class="mt-8 text-xl font-bold text-white">Methodology and limitations, in brief</h3>
+  <p class="mt-3 leading-7">Each city's index estimates total consumer costs relative to New York City at 100, compiled from public knowledge of price baskets and rounded for stability. Monthly expenses scale linearly with the index from a New York baseline, then split into housing (40%), food (22%), transport (8%), and other (30%) — shares chosen to represent a modest single-professional lifestyle. Currency rates are rough estimates per US dollar. The verdict thresholds treat any disposable-income change within 1% of salary (or $500, whichever is larger) as "roughly equal" to avoid false precision. Nothing here is live data, nothing is personalized, and nothing is financial advice — it is a planning estimate, clearly labeled as such throughout the tool.</p>
+</article>
+
+<!-- ============ FAQs ============ -->
+<section class="mx-auto max-w-4xl px-4 sm:px-6 pb-12" aria-label="Frequently asked questions">
+  <h2 class="text-2xl font-extrabold text-white tracking-tight mb-5">Frequently Asked Questions</h2>
+  <div class="space-y-3">
+    <details class="faq rounded-xl border border-slate-700/70 bg-ink2/70 px-5 py-4">
+      <summary class="text-white font-semibold">How accurate is this relocation salary calculator?</summary>
+      <p class="mt-3 text-sm text-slate-400 leading-6">It is a planning estimate, not a precise quote. City cost indices are compiled from public knowledge and rounded, currency rates are rough baked-in estimates rather than live rates, and the expense basket models a single professional with a modest lifestyle. Use it to compare cities and anchor negotiations; before signing, verify current rents and exchange rates from live sources.</p>
+    </details>
+    <details class="faq rounded-xl border border-slate-700/70 bg-ink2/70 px-5 py-4">
+      <summary class="text-white font-semibold">What is an equivalent salary when moving cities?</summary>
+      <p class="mt-3 text-sm text-slate-400 leading-6">The equivalent salary is the pay you would need in the target city to end up with exactly the same disposable income — salary minus estimated living expenses — as you have now. GeoPay computes it as your current salary plus the annualized difference in estimated monthly expenses between the two cities. Any offer above it is a real raise in lifestyle terms; anything below is effectively a pay cut.</p>
+    </details>
+    <details class="faq rounded-xl border border-slate-700/70 bg-ink2/70 px-5 py-4">
+      <summary class="text-white font-semibold">Why does the calculator ignore taxes?</summary>
+      <p class="mt-3 text-sm text-slate-400 leading-6">Income tax varies enormously between cities, states, and countries — a move from Texas to California or from Dubai to London changes take-home pay more than groceries ever could. Modeling every tax regime in an offline tool would be misleading, so GeoPay compares gross salary against living costs and clearly labels the result an estimate. For a final decision, run the numbers through a tax calculator for both locations.</p>
+    </details>
+    <details class="faq rounded-xl border border-slate-700/70 bg-ink2/70 px-5 py-4">
+      <summary class="text-white font-semibold">What is a good rent burden percentage?</summary>
+      <p class="mt-3 text-sm text-slate-400 leading-6">The widely used guideline is to keep housing costs under 30% of gross income. GeoPay's rent-burden dial marks under 30% as Comfortable, 30–40% as Stretched, and over 40% as Overburdened. Many landlords also require income of roughly three times the rent, so the dial doubles as a check on which apartments you are likely to qualify for in the target city.</p>
+    </details>
+    <details class="faq rounded-xl border border-slate-700/70 bg-ink2/70 px-5 py-4">
+      <summary class="text-white font-semibold">Should I accept a higher salary in a more expensive city?</summary>
+      <p class="mt-3 text-sm text-slate-400 leading-6">Only if your disposable income — what is left after expenses — actually rises. Compare the offer against the equivalent salary GeoPay shows: if the offer beats it, your lifestyle improves; if not, the higher number is an illusion. Also check the rent-burden and savings-rate dials, since a move can raise disposable income while still making housing uncomfortably expensive.</p>
+    </details>
+    <details class="faq rounded-xl border border-slate-700/70 bg-ink2/70 px-5 py-4">
+      <summary class="text-white font-semibold">Does it work for international moves and currency conversion?</summary>
+      <p class="mt-3 text-sm text-slate-400 leading-6">Yes, with extra caution. The dataset covers 190+ cities across 60+ countries, and currency conversion uses rough baked-in exchange rates — not live forex data. International moves also involve different tax systems, visa costs, and healthcare models that the tool does not model, so treat cross-border results as a first filter and research the destination's tax and benefits system separately.</p>
+    </details>
+  </div>
+</section>
+
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "mainEntity": [
+    {
+      "@type": "Question",
+      "name": "How accurate is this relocation salary calculator?",
+      "acceptedAnswer": { "@type": "Answer", "text": "It is a planning estimate, not a precise quote. City cost indices are compiled from public knowledge and rounded, currency rates are rough baked-in estimates rather than live rates, and the expense basket models a single professional with a modest lifestyle. Use it to compare cities and anchor negotiations; before signing, verify current rents and exchange rates from live sources." }
+    },
+    {
+      "@type": "Question",
+      "name": "What is an equivalent salary when moving cities?",
+      "acceptedAnswer": { "@type": "Answer", "text": "The equivalent salary is the pay you would need in the target city to end up with exactly the same disposable income — salary minus estimated living expenses — as you have now. GeoPay computes it as your current salary plus the annualized difference in estimated monthly expenses between the two cities. Any offer above it is a real raise in lifestyle terms; anything below is effectively a pay cut." }
+    },
+    {
+      "@type": "Question",
+      "name": "Why does the calculator ignore taxes?",
+      "acceptedAnswer": { "@type": "Answer", "text": "Income tax varies enormously between cities, states, and countries — a move from Texas to California or from Dubai to London changes take-home pay more than groceries ever could. Modeling every tax regime in an offline tool would be misleading, so GeoPay compares gross salary against living costs and clearly labels the result an estimate. For a final decision, run the numbers through a tax calculator for both locations." }
+    },
+    {
+      "@type": "Question",
+      "name": "What is a good rent burden percentage?",
+      "acceptedAnswer": { "@type": "Answer", "text": "The widely used guideline is to keep housing costs under 30% of gross income. GeoPay's rent-burden dial marks under 30% as Comfortable, 30–40% as Stretched, and over 40% as Overburdened. Many landlords also require income of roughly three times the rent, so the dial doubles as a check on which apartments you are likely to qualify for in the target city." }
+    },
+    {
+      "@type": "Question",
+      "name": "Should I accept a higher salary in a more expensive city?",
+      "acceptedAnswer": { "@type": "Answer", "text": "Only if your disposable income — what is left after expenses — actually rises. Compare the offer against the equivalent salary GeoPay shows: if the offer beats it, your lifestyle improves; if not, the higher number is an illusion. Also check the rent-burden and savings-rate dials, since a move can raise disposable income while still making housing uncomfortably expensive." }
+    },
+    {
+      "@type": "Question",
+      "name": "Does it work for international moves and currency conversion?",
+      "acceptedAnswer": { "@type": "Answer", "text": "Yes, with extra caution. The dataset covers 190+ cities across 60+ countries, and currency conversion uses rough baked-in exchange rates — not live forex data. International moves also involve different tax systems, visa costs, and healthcare models that the tool does not model, so treat cross-border results as a first filter and research the destination's tax and benefits system separately." }
+    }
+  ]
+}
+</script>
+
+<!-- ============ UI WIRING (uses the pure lib above; no lib logic here) ============ -->
+<script>
+(function () {
+  'use strict';
+
+  var $ = function (id) { return document.getElementById(id); };
+  var fmtInt = new Intl.NumberFormat('en-US');
+
+  var TONE = { good: '#34D399', warn: '#FBBF24', bad: '#F87171', gray: '#94A3B8' };
+
+  /* ---------- populate city datalist + currency selects ---------- */
+  var cities = geopayAllCities();
+  var dl = $('city-list');
+  cities.forEach(function (c) {
+    var o = document.createElement('option');
+    o.value = c.name;
+    o.label = c.name + ', ' + c.country;
+    dl.appendChild(o);
+  });
+
+  var curCodes = Object.keys(GEOPAY_FX_PER_USD).sort();
+  var selFrom = $('currency-from'), selTo = $('currency-to');
+  curCodes.forEach(function (code) {
+    var sym = GEOPAY_CURRENCY_SYMBOLS[code];
+    var label = code + (sym ? ' (' + sym.trim() + ')' : '');
+    var o1 = document.createElement('option'); o1.value = code; o1.textContent = label;
+    var o2 = document.createElement('option'); o2.value = code; o2.textContent = label;
+    selFrom.appendChild(o1); selTo.appendChild(o2);
+  });
+  selFrom.value = 'USD';
+
+  $('city-to').addEventListener('change', function () {
+    var c = geopayFindCity($('city-to').value);
+    if (c && GEOPAY_FX_PER_USD[c.currency]) selTo.value = c.currency;
+  });
+
+  /* ---------- dial renderer (semicircle gauge) ---------- */
+  function dialSVG(fill01, color, centerText, subText) {
+    var R = 40, C = Math.PI * R; // semicircle length
+    var off = C * (1 - Math.max(0, Math.min(1, fill01)));
+    return '' +
+      '<svg width="120" height="78" viewBox="0 0 100 62">' +
+      '<path d="M 10 56 A 40 40 0 0 1 90 56" fill="none" stroke="rgba(148,163,184,0.18)" stroke-width="11" stroke-linecap="round"/>' +
+      '<path class="dial-arc" d="M 10 56 A 40 40 0 0 1 90 56" fill="none" stroke="' + color + '" stroke-width="11" stroke-linecap="round"' +
+      ' stroke-dasharray="' + C.toFixed(1) + '" stroke-dashoffset="' + off.toFixed(1) + '"/>' +
+      '<text x="50" y="46" text-anchor="middle" fill="#fff" font-size="15" font-weight="800">' + centerText + '</text>' +
+      '<text x="50" y="60" text-anchor="middle" fill="#94A3B8" font-size="8.5">' + subText + '</text>' +
+      '</svg>';
+  }
+
+  function breakdownRows(el, b, currency) {
+    var rows = [
+      ['Housing', b.housing, '#34D399'],
+      ['Food', b.food, '#FBBF24'],
+      ['Transport', b.transport, '#60A5FA'],
+      ['Other', b.other, '#94A3B8']
+    ];
+    var html = '<p class="text-[11px] uppercase tracking-widest text-slate-500 font-bold mb-1">Est. monthly spend</p>';
+    rows.forEach(function (r) {
+      var pct = b.total > 0 ? (r[1] / b.total) * 100 : 0;
+      html += '<div>' +
+        '<div class="flex justify-between text-xs text-slate-400"><span>' + r[0] + '</span><span>' + geopayFormatMoney(r[1], currency) + '</span></div>' +
+        '<div class="h-1.5 rounded-full bar-track mt-0.5"><div class="h-full rounded-full" style="width:' + pct.toFixed(1) + '%;background:' + r[2] + '"></div></div>' +
+        '</div>';
+    });
+    el.innerHTML = html;
+  }
+
+  function showError(msg) {
+    var e = $('error-msg');
+    e.textContent = msg;
+    e.classList.remove('hidden');
+    $('results').classList.add('hidden');
+  }
+
+  function clearError() { $('error-msg').classList.add('hidden'); }
+
+  /* ---------- main compare ---------- */
+  $('compare-btn').addEventListener('click', function () {
+    clearError();
+    var fromName = $('city-from').value;
+    var toName = $('city-to').value;
+    var curFrom = selFrom.value, curTo = selTo.value;
+    var salaryFrom = parseFloat($('salary-from').value);
+    var salaryToRaw = parseFloat($('salary-to').value);
+
+    var errs = geopayValidate(fromName, toName, geopayToUSD(salaryFrom, curFrom) || 0);
+    if (errs.indexOf('unknown_from_city') !== -1) return showError('Please pick a valid current city from the suggestions.');
+    if (errs.indexOf('unknown_to_city') !== -1) return showError('Please pick a valid target city from the suggestions.');
+    if (errs.indexOf('invalid_salary') !== -1) return showError('Please enter a valid current annual salary above zero.');
+
+    var salaryUSD = geopayToUSD(salaryFrom, curFrom);
+    var offerUSD = (!isNaN(salaryToRaw) && salaryToRaw > 0) ? geopayToUSD(salaryToRaw, curTo) : null;
+    if (offerUSD === null && !isNaN(salaryToRaw) && salaryToRaw > 0) return showError('Currency conversion unavailable for the offer currency.');
+
+    var r = geopayCompare(fromName, toName, salaryUSD, offerUSD);
+    if (r.error) return showError('Could not compare these cities. Please check your inputs.');
+
+    /* verdict */
+    var banner = $('verdict-banner');
+    var vText = $('verdict-text'), vSub = $('verdict-sub');
+    var icon = $('verdict-icon');
+    banner.className = 'rounded-2xl border p-5 sm:p-6 flex flex-col sm:flex-row sm:items-center gap-4 ';
+    var arrowUp = '<svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="COLOR" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>';
+    var arrowDown = '<svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="COLOR" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><polyline points="19 12 12 19 5 12"/></svg>';
+    var arrowFlat = '<svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="COLOR" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/></svg>';
+    if (r.verdict === 'raise') {
+      banner.className += 'border-mint/50 bg-mint/10';
+      vText.innerHTML = '<span class="text-mint">REAL RAISE</span>';
+      icon.innerHTML = arrowUp.replace(/COLOR/g, '#34D399');
+      vSub.textContent = 'This move grows your disposable income by about ' + geopayFormatMoney(Math.abs(r.delta), 'USD') + '/yr after estimated expenses.';
+    } else if (r.verdict === 'cut') {
+      banner.className += 'border-red-400/50 bg-red-400/10';
+      vText.innerHTML = '<span class="text-red-400">PAY CUT</span>';
+      icon.innerHTML = arrowDown.replace(/COLOR/g, '#F87171');
+      vSub.textContent = 'This move shrinks your disposable income by about ' + geopayFormatMoney(Math.abs(r.delta), 'USD') + '/yr after estimated expenses.';
+    } else {
+      banner.className += 'border-gold/50 bg-gold/10';
+      vText.innerHTML = '<span class="text-gold">ROUGHLY EQUAL</span>';
+      icon.innerHTML = arrowFlat.replace(/COLOR/g, '#FBBF24');
+      vSub.textContent = 'Disposable income barely moves — lifestyle stays about the same (within estimate tolerance).';
+    }
+    if (r.sameCity) vSub.textContent += ' Same city selected: no relocation change.';
+
+    /* equivalent salary + delta */
+    $('equiv-city').textContent = r.to.name;
+    $('equiv-amount').textContent = geopayFormatMoney(r.equivalentUSD, 'USD');
+    var dEl = $('delta-val');
+    var dSign = r.delta > 0 ? '+' : '';
+    dEl.textContent = 'Offer vs equivalent: ' + dSign + geopayFormatMoney(r.offerUSD - r.equivalentUSD, 'USD');
+    dEl.className = 'text-sm font-semibold mt-1 ' + ((r.offerUSD - r.equivalentUSD) >= 0 ? 'text-mint' : 'text-red-400');
+
+    /* city labels */
+    $('disp-from-city').textContent = r.from.name + ', ' + r.from.country;
+    $('disp-to-city').textContent = r.to.name + ', ' + r.to.country;
+
+    /* disposable income */
+    $('disp-from-val').textContent = geopayFormatMoney(r.curDisp, 'USD');
+    $('disp-to-val').textContent = geopayFormatMoney(r.tgtDisp, 'USD');
+    var expFrom = r.curBreakdown.total * 12, expTo = r.tgtBreakdown.total * 12;
+    $('exp-from-val').textContent = geopayFormatMoney(expFrom, 'USD') + '/yr';
+    $('exp-to-val').textContent = geopayFormatMoney(expTo, 'USD') + '/yr';
+    $('left-from-val').textContent = geopayFormatMoney(r.curDisp, 'USD') + '/yr';
+    $('left-to-val').textContent = geopayFormatMoney(r.tgtDisp, 'USD') + '/yr';
+    var maxBar = Math.max(salaryUSD, r.offerUSD, 1);
+    $('bar-exp-from').style.width = Math.min(100, (expFrom / maxBar) * 100) + '%';
+    $('bar-exp-to').style.width = Math.min(100, (expTo / maxBar) * 100) + '%';
+    $('bar-left-from').style.width = Math.min(100, (Math.max(0, r.curDisp) / maxBar) * 100) + '%';
+    $('bar-left-to').style.width = Math.min(100, (Math.max(0, r.tgtDisp) / maxBar) * 100) + '%';
+
+    /* breakdowns (shown in each city's own currency) */
+    breakdownRows($('breakdown-from'), {
+      housing: geopayFromUSD(r.curBreakdown.housing, r.from.currency),
+      food: geopayFromUSD(r.curBreakdown.food, r.from.currency),
+      transport: geopayFromUSD(r.curBreakdown.transport, r.from.currency),
+      other: geopayFromUSD(r.curBreakdown.other, r.from.currency),
+      total: geopayFromUSD(r.curBreakdown.total, r.from.currency)
+    }, r.from.currency);
+    breakdownRows($('breakdown-to'), {
+      housing: geopayFromUSD(r.tgtBreakdown.housing, r.to.currency),
+      food: geopayFromUSD(r.tgtBreakdown.food, r.to.currency),
+      transport: geopayFromUSD(r.tgtBreakdown.transport, r.to.currency),
+      other: geopayFromUSD(r.tgtBreakdown.other, r.to.currency),
+      total: geopayFromUSD(r.tgtBreakdown.total, r.to.currency)
+    }, r.to.currency);
+
+    /* dials */
+    var bFrom = geopayBurdenStatus(r.curBurden), bTo = geopayBurdenStatus(r.tgtBurden);
+    var sFrom = geopaySavingsStatus(r.curSavings), sTo = geopaySavingsStatus(r.tgtSavings);
+    var pct = function (x) { return x === null || !isFinite(x) ? '—' : Math.round(x * 100) + '%'; };
+    $('dial-rent-from').innerHTML = dialSVG(r.curBurden, TONE[bFrom.tone], pct(r.curBurden), bFrom.label);
+    $('dial-rent-to').innerHTML = dialSVG(r.tgtBurden, TONE[bTo.tone], pct(r.tgtBurden), bTo.label);
+    $('dial-rent-from-label').textContent = r.from.name;
+    $('dial-rent-to-label').textContent = r.to.name;
+    $('dial-sav-from').innerHTML = dialSVG(r.curSavings, TONE[sFrom.tone], pct(r.curSavings), sFrom.label);
+    $('dial-sav-to').innerHTML = dialSVG(r.tgtSavings, TONE[sTo.tone], pct(r.tgtSavings), sTo.label);
+    $('dial-sav-from-label').textContent = r.from.name;
+    $('dial-sav-to-label').textContent = r.to.name;
+
+    $('results').classList.remove('hidden');
+    $('results').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  });
+})();
+</script>
+</body>
+</html>
